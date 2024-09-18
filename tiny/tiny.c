@@ -67,11 +67,7 @@ void doit(int fd) {
   return; }
 
 
-  printf("[1] doit start\n");
-
   if (is_static) { /* Serve static content */
-
-  printf("[2] is_static? \n");
       if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
           clienterror(fd, filename, "403", "Forbidden",
                       "Tiny couldn't read the file");
@@ -146,30 +142,19 @@ int parse_uri(char *uri, char *filename, char *cgiargs) {
 
 
 void serve_static(int fd, char *filename, int filesize) {
-  printf("start serve_static\n");
-
   int srcfd;
   char *srcp, filetype[MAXLINE], buf[MAXBUF];
 
   /* Send response headers to client */
   get_filetype(filename, filetype);
-  printf("1\n");
   sprintf(buf, "HTTP/1.0 200 OK\r\n");
-  printf("2\n");
   sprintf(buf, "%sServer: Tiny Web Server\r\n", buf);
-  printf("3\n");
   sprintf(buf, "%sConnection: close\r\n", buf);
-  printf("4\n");
   sprintf(buf, "%sContent-length: %d\r\n", buf, filesize);
-  printf("5\n");
-  sprintf(buf, "%sContent-type: %s\r\n\r\n", buf, filetype);
-  printf("6\n");  
+  sprintf(buf, "%sContent-type: %s\r\n\r\n", buf, filetype); 
   Rio_writen(fd, buf, strlen(buf));
-  printf("7\n");
   printf("Response headers:\n");
-  printf("8\n");
   printf("%s", buf);
-  printf("9\n");
 
   /* Send response body to client */
   srcfd = Open(filename, O_RDONLY, 0);
@@ -177,8 +162,6 @@ void serve_static(int fd, char *filename, int filesize) {
   Close(srcfd);
   Rio_writen(fd, srcp, filesize);
   Munmap(srcp, filesize);
-
-  printf("end serve_static\n");
 }
 
 /*
