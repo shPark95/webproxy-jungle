@@ -14,8 +14,8 @@ int parse_uri(char *uri, char *filename, char *cgiargs);
 void serve_static(int fd, char *filename, int filesize);
 void get_filetype(char *filename, char *filetype);
 void serve_dynamic(int fd, char *filename, char *cgiargs);
-void clienterror(int fd, char *cause, char *errnum, char *shortmsg,
-                 char *longmsg);
+void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg);
+void echo(int connfd);
 
 int main(int argc, char **argv) {
   int listenfd, connfd;
@@ -32,13 +32,25 @@ int main(int argc, char **argv) {
   listenfd = Open_listenfd(argv[1]);
   while (1) {
     clientlen = sizeof(clientaddr);
-    connfd = Accept(listenfd, (SA *)&clientaddr,
-                    &clientlen);  // line:netp:tiny:accept
-    Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE,
-                0);
+    connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);  // line:netp:tiny:accept
+    Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE, 0);
     printf("Accepted connection from (%s, %s)\n", hostname, port);
     doit(connfd);   // line:netp:tiny:doit
+    echo(connfd);
     Close(connfd);  // line:netp:tiny:close
+  }
+}
+
+void echo(int connfd)
+{
+  size_t n;
+  char buf[MAXLINE];
+  rio_t rio;
+
+  Rio_readinitb(&rio, connfd);
+  while((n = Rio_readlineb(&rio, buf, MAXLINE)) != 0) {
+    printf("server received %d bytes\n", (int) n);
+    Rio_writen(connfd, buf, n);
   }
 }
 
@@ -123,14 +135,14 @@ int parse_uri(char *uri, char *filename, char *cgiargs) {
     strcpy(filename, ".");
     strcat(filename, uri);
     if (uri[strlen(uri)-1] == '/')
-        strcat(filename, "home.html");
+      strcat(filename, "home.html");
     return 1; 
   }
   else {  /* Dynamic content */
     ptr = index(uri, '?');
     if (ptr) {
-        strcpy(cgiargs, ptr+1);
-    *ptr = '\0';
+      strcpy(cgiargs, ptr+1);
+      *ptr = '\0';
     }
     else
         strcpy(cgiargs, "");
