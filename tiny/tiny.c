@@ -11,13 +11,16 @@
 void doit(int fd);
 void read_requesthdrs(rio_t *rp);
 int parse_uri(char *uri, char *filename, char *cgiargs);
-void serve_static(int fd, char *filename, int filesize);
+// void serve_static(int fd, char *filename, int filesize);
+void serve_static(int fd, char *filename, int filesize, char *method);
 void get_filetype(char *filename, char *filetype);
-void serve_dynamic(int fd, char *filename, char *cgiargs);
+// void serve_dynamic(int fd, char *filename, char *cgiargs);
+void serve_dynamic(int fd, char *filename, char *cgiargs, char *method);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg);
 void echo(int connfd);
 
 int main(int argc, char **argv) {
+  signal(SIGPIPE, SIG_IGN);
   int listenfd, connfd;
   char hostname[MAXLINE], port[MAXLINE];
   socklen_t clientlen;
@@ -65,7 +68,8 @@ void doit(int fd) {
   Rio_readlineb(&rio, buf, MAXLINE);
   printf("Request Headers: %s", buf);
   sscanf(buf, "%s %s %s", method, uri, version);
-  if ((strcasecmp(method, "GET"))) {
+  // if ((strcasecmp(method, "GET"))) {
+  if (!(strcasecmp(method, "GET") == 0 || strcasecmp(method, "HEAD") == 0)) {
     clienterror(fd, method, "501", "Not Implemented",
               "Tiny does not implement this method");
   return; }
@@ -84,14 +88,14 @@ void doit(int fd) {
           clienterror(fd, filename, "403", "Forbidden",
                       "Tiny couldn't read the file");
   return; }
-      serve_static(fd, filename, sbuf.st_size);
+      serve_static(fd, filename, sbuf.st_size, method);
   }
   else { /* Serve dynamic content */
       if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) {
           clienterror(fd, filename, "403", "Forbidden",
                       "Tiny couldn't run the CGI program");
   return; }
-      serve_dynamic(fd, filename, cgiargs);
+      serve_dynamic(fd, filename, cgiargs, method);
   }
 }
 
@@ -153,13 +157,16 @@ int parse_uri(char *uri, char *filename, char *cgiargs) {
 }
 
 
-void serve_static(int fd, char *filename, int filesize) {
+// void serve_static(int fd, char *filename, int filesize) {
+void serve_static(int fd, char *filename, int filesize, char *method) {
   int srcfd;
+  ssize_t n;
+
   char *srcp, filetype[MAXLINE], buf[MAXBUF];
 
   /* Send response headers to client */
   get_filetype(filename, filetype);
-  sprintf(buf, "HTTP/1.0 200 OK\r\n");
+  sprintf(buf, "HTTP/1.1 200 OK\r\n");
   sprintf(buf, "%sServer: Tiny Web Server\r\n", buf);
   sprintf(buf, "%sConnection: close\r\n", buf);
   sprintf(buf, "%sContent-length: %d\r\n", buf, filesize);
@@ -168,12 +175,18 @@ void serve_static(int fd, char *filename, int filesize) {
   printf("Response headers:\n");
   printf("%s", buf);
 
+  if (strcasecmp(method, "HEAD") == 0)
+    return;
+
   /* Send response body to client */
-  srcfd = Open(filename, O_RDONLY, 0);
-  srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
+  srcfd = Open(filename, O_RDONLY, 0);  //line:netp:servestatic:mmap
+  srcp = (char*)Malloc(filesize);
+  Rio_readn(srcfd, srcp, filesize);
+  // srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
   Close(srcfd);
   Rio_writen(fd, srcp, filesize);
-  Munmap(srcp, filesize);
+  free(srcp);
+  // Munmap(srcp, filesize);
 }
 
 /*
@@ -188,22 +201,25 @@ void get_filetype(char *filename, char *filetype) {
     strcpy(filetype, "image/png");
   else if (strstr(filename, ".jpg"))
     strcpy(filetype, "image/jpeg");
+  else if (strstr(filename, ".mp4"))
+    strcpy(filetype, "video/mp4");
   else
     strcpy(filetype, "text/plain");
 }
 
-
-void serve_dynamic(int fd, char *filename, char *cgiargs) {
+// void serve_dynamic(int fd, char *filename, char *cgiargs) {
+void serve_dynamic(int fd, char *filename, char *cgiargs, char *method) {
   char buf[MAXLINE], *emptylist[] = { NULL };
 
   /* Return first part of HTTP response */
-  sprintf(buf, "HTTP/1.0 200 OK\r\n");
+  sprintf(buf, "HTTP/1.1 200 OK\r\n");
   Rio_writen(fd, buf, strlen(buf));
   sprintf(buf, "Server: Tiny Web Server\r\n");
   Rio_writen(fd, buf, strlen(buf));
   if (Fork() == 0) { /* Child */
     /* Real server would set all CGI vars here */
     setenv("QUERY_STRING", cgiargs, 1);
+    setenv("REQUEST_METHOD", method, 1);
     Dup2(fd, STDOUT_FILENO);         /* Redirect stdout to client */
     Execve(filename, emptylist, environ); /* Run CGI program */
   }
