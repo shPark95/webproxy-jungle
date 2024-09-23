@@ -1,33 +1,25 @@
 #include <stdio.h>
 #include "csapp.h"
-#include <pthread.h>
-#include "cache.h"
 
 /* Recommended max cache and object sizes */
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
 
-cache_t cache;
 /* You won't lose style points for including this long line in your code */
 static const char *user_agent_hdr =
     "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 "
     "Firefox/10.0.3\r\n";
 
 void doit(int clientfd);
-void *thread(void *vargp);
 void header_make(char *method, char *request_ip, char *user_agent_hdr, char *version, int clientfd, char *filename);
 
 int main(int argc, char **argv) {
   printf("%s", user_agent_hdr);
   signal(SIGPIPE, SIG_IGN);
-  int listenfd, *connfdp;
+  int listenfd, connfd;
   char hostname[MAXLINE], port[MAXLINE];
   socklen_t clientlen;
-  pthread_t tid;
   struct sockaddr_storage clientaddr;
-
-  /* 캐시 초기화 */
-  cache_init(&cache);
 
   /* Check command line args */
   if (argc != 2) {
@@ -38,27 +30,14 @@ int main(int argc, char **argv) {
   listenfd = Open_listenfd(argv[1]);
   while (1) {
     clientlen = sizeof(clientaddr);
-    connfdp = Malloc(sizeof(int)); 
-    *connfdp = Accept(listenfd, (SA *)&clientaddr, &clientlen);  // line:netp:tiny:accept
+    connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);  // line:netp:tiny:accept
     Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE, 0);
     printf("Accepted connection from (%s, %s)\n", hostname, port);
 
-    Pthread_create(&tid, NULL, thread, connfdp);
-    // Close(connfdp);  // line:netp:tiny:close 생략가능
+    doit(connfd);   // line:netp:tiny:doit
+    Close(connfd);  // line:netp:tiny:close
   }
-  cache_free(&cache);
-  
   return 0;
-}
-
-/* Routine of Peer Thread */
-void *thread(void *vargp) {
-	int connfd = *((int *)vargp);		// 넘겨받은 Heap 공간값을 connfd가 가리킨다.
-	Pthread_detach(pthread_self());  	// 아래에서 설명할 것! (Reaping 관련)
-	Free(vargp); 						// 값을 추출했으므로, 힙공간은 해제하자.
-	doit(connfd);						// connfd에 대해서 Service를 제공한다!
-  Close(connfd);					// 서비스 끝나면 디스크립터를 닫자!
-	return NULL;						// pthread_create 함수에게 NULL을 넘김(관습)
 }
 
 void doit(int clientfd) {
@@ -97,7 +76,7 @@ void doit(int clientfd) {
         // request_ip가 있고, uri는 없으므로 '/'가 있는 경우 처리
         char *slash = strchr(request_ip, '/');
         if (slash) {
-            strcpy(uri, slash + 1); // '/0 다음부터 uri를 복사
+            strcpy(uri, slash + 1); // '/' 다음부터 uri를 복사
             *slash = '\0'; // request_ip에서 '/' 제거
         } else {
             strcpy(uri, ""); // uri가 없는 경우
@@ -108,54 +87,22 @@ void doit(int clientfd) {
     strcpy(uri, "/");
   // read_requesthdrs(&rio_client);
 
-  // 요청 URL을 재구성
-  char cache_url[MAXLINE];
-  sprintf(cache_url, "%s:%s%s", request_ip, port, uri);
-  
-  // 캐시 조회
-  pthread_mutex_lock(&cache.lock);
-  cache_entry_t *entry = cache_lookup(&cache, cache_url);
-  if (entry) {
-      // 캐시 히트: 클라이언트에게 캐시된 응답 전송
-      printf("Cache hit for URL: %s\n", cache_url);
-      Rio_writen(clientfd, entry->response, entry->response_size);
-      cache_free(&cache);
-      pthread_mutex_unlock(&cache.lock);
-      return;
-  }
-  pthread_mutex_unlock(&cache.lock);
-
   //서버요청 소켓
   forwardfd = Open_clientfd(request_ip, port);
   Rio_readinitb(&rio_server, forwardfd);        //rio_t의 읽기 버퍼와 fd를 연결
   // HTTP/1.1을 1.0으로 변경 및 서버로 전송
   sprintf(cbuf, "%s %s HTTP/1.0\r\n", method, uri);
   sprintf(cbuf, "%sHost: %s\r\n", cbuf, request_ip);
-  //sprintf(buf, "%sConnection: %s\r\n", buf, "close");xw
+  //sprintf(buf, "%sConnection: %s\r\n", buf, "close");
   sprintf(cbuf, "%sProxy-Connection: close\r\n", cbuf);
   sprintf(cbuf, "%s%s\r\n\r\n", cbuf, user_agent_hdr);
 
   Rio_writen(forwardfd, cbuf, strlen(cbuf));
   // 서버 응답을 클라이언트에게 전달하는 함수 추가 필요
 
-  // while((n = Rio_readlineb(&rio_server, sbuf, MAXLINE)) > 0) {
-  //   Rio_writen(clientfd, sbuf, n);       //fd에 써서 보내준다.(클라이언트로)
-  // }
-
-  // 서버 응답을 읽고 클라이언트에게 전달하면서 캐시에 저장
-  char response[MAX_OBJECT_SIZE];
-  size_t total_size = 0;
   while((n = Rio_readlineb(&rio_server, sbuf, MAXLINE)) > 0) {
-      if (total_size + n < MAX_OBJECT_SIZE) {
-          memcpy(response + total_size, sbuf, n);
-          total_size += n;
-      }
-      Rio_writen(clientfd, sbuf, n);
+    Rio_writen(clientfd, sbuf, n);       //fd에 써서 보내준다.(클라이언트로)
   }
-  response[total_size] = '\0'; // 널 문자 추가
-
-  // 캐시에 저장
-  cache_insert(&cache, cache_url, response, total_size);
   
   Close(forwardfd);
 }

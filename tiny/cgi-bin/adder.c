@@ -37,7 +37,7 @@ int main(void) {
   printf("Connection: close\r\n");
   printf("Content-length: %d\r\n", (int)strlen(content));
   printf("Content-type: text/html\r\n\r\n");
-  if (strcasecmp(method, "HEAD") == 0)
+  if (strcasecmp(method, "HEAD") != 0)
     printf("%s", content);
 
   fflush(stdout);

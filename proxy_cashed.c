@@ -119,7 +119,7 @@ void doit(int clientfd) {
       // 캐시 히트: 클라이언트에게 캐시된 응답 전송
       printf("Cache hit for URL: %s\n", cache_url);
       Rio_writen(clientfd, entry->response, entry->response_size);
-      cache_free(&cache);
+      //cache_free(&cache);
       pthread_mutex_unlock(&cache.lock);
       return;
   }
